@@ -1,2 +1,43 @@
-# hpp
-The implementation of hierarchical program paths, Chunbai Yang, Shangru Wu, and W. K. Chan. 2016. Hierarchical Program Paths. ACM Trans. Softw. Eng. Methodol. 25, 3, Article 27 (August 2016), 44 pages. DOI: https://doi.org/10.1145/2963094
+# HPP
+The code, HPP for short, is developed to implement experiments referred in the paper "Hierarchical Program Paths" (Chunbai Yang, Shangru Wu, and W. K. Chan. 2016. Hierarchical Program Paths. ACM Trans. Softw. Eng. Methodol. 25, 3, Article 27 (August 2016), 44 pages. DOI: https://doi.org/10.1145/2963094)
+The paper can also be downloaded in the link http://www.cs.cityu.edu.hk/~wkchan/papers/tosem2016-yang+wu+chan.pdf
+
+Note that the program was developed on LLVM 3.5, and only tested on Ubuntu 12.04.
+
+The major steps to use the tool are 
+1) build the libraries in LLVM 
+2) instrument the program whose execution traces are to be collected 
+3) execute the instrumented program to generate execution traces 
+4) generate HPPDAG from execution traces
+5) perform analysis on HPPDAG
+
+Suppose the root directory for HPP code is $ROOT
+1) build the libraries in LLVM 
+	pathTracing.a: the static libary used by HPP for instrumentation and modeling, created by running Makefile in $ROOT/lib
+	HPPTransform.so: the dynamic library to be loaded by LLVM opt for program instrumentation, created by running Makefile in $ROOT/HPPTransform
+	HPPTraceAnalysis.so: the dynamic library to be loaded by LLVM opt for creating HPPDAG from execution traces and analyzing HPPDAG, created by running Makefile in $ROOT/HPPTraceAnalysis. Note that the code also contains dependency on google profiler.
+
+2) instrument the program whose execution traces are to be collected 
+	Firstly, transform the program, say $name, into a single-file bitcode, say $bitcodeFile. Then instrument the bitcode, e.g.,
+		opt -load HPPTransform.so -HPPTransform $bitcodeFile -o $name.pt.bc
+	Next, compile the tracing runtime
+		clang -emit-llvm -c `pkg-config --cflags --libs glib-2.0` $ROOT/HPPTransform/TracingRuntime/HPPRuntime.c -DLIBCALLOPT -o HPPRuntime.bc
+	Finally, link tracing runtime with program bitcode and compile
+		llvm-link $name.pt.bc HPPRuntime.bc -o $name.trans.bc
+		llc -filetype=obj $name.trans.bc -o $name.trans.o
+		clang++ -pthread -ldl `pkg-config --cflags --libs glib-2.0` $name.trans.o -o $name.hpp.inst
+	$name.hpp.inst is then the instrumented executable of the program for path tracing.
+
+3) execute the instrumented program to generate execution traces 
+	execute $name.hpp.inst with the test cases, the output trace files are named in the format, hpp_TIMESTAMP_pid, TIMESTAMP is the unix timestamp when the execution starts, e.g., 1565591564. And pid is the process id.
+
+4) generate HPPDAG from execution traces
+	$traceArgs are the paths of the execution traces generated in step3, seperated by ,
+	opt -load HPPTraceAnalysis.so -HPPTrace $bitcodeFile -hpp-create-serialized-dag -trace-files=$traceArgs
+	The output is a serialized HPPDAG file named traceDict
+
+5) perform analysis on HPPDAG
+	Several analysis on HPPDAG are implemented in HPPTraceAnalysis.so.
+	One exemplified analysis, which simply counts the number of DAG nodes of HPPDAG is shown as follows.
+		opt -load HPPTraceAnalysis.so -HPPTrace $bitcodeFile -count-dag-nodes -trace-path traceDict 
+
